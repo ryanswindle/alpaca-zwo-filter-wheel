@@ -7,6 +7,7 @@ from fastapi import Form, HTTPException, Query
 @dataclass
 class AlpacaGetParams:
     """Common query parameters for Alpaca GET requests."""
+
     client_id: int = 0
     client_transaction_id: int = 0
 
@@ -22,6 +23,7 @@ class AlpacaGetParams:
 @dataclass
 class AlpacaPutParams:
     """Common form parameters for Alpaca PUT requests."""
+
     client_id: int = 0
     client_transaction_id: int = 0
 

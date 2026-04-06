@@ -1,5 +1,5 @@
 """
-ASCOM Alpaca QHYCCD Filter Wheel Server – Main FastAPI Application
+ASCOM Alpaca ZWO Filter Wheel Server – Main FastAPI Application
 
 Entrypoint that:
   - Creates the FastAPI application
@@ -34,6 +34,7 @@ devices: Dict[int, FilterWheelDevice] = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager – startup and shutdown."""
+
     logger.info(f"Starting {config.entity} on {config.server.host}:{config.server.port}")
 
     # Instantiate devices from config
@@ -66,8 +67,8 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI application
 app = FastAPI(
-    title="ASCOM Alpaca QHYCCD Filter Wheel Server",
-    description="ASCOM Alpaca API for the QHYCCD filter wheel (serial)",
+    title="ASCOM Alpaca ZWO Filter Wheel Server",
+    description="ASCOM Alpaca API for the ZWO filter wheel (EFW)",
     version="1.0.0",
     lifespan=lifespan,
 )

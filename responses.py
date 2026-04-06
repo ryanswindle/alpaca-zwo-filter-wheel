@@ -20,12 +20,14 @@ def get_next_transaction_id() -> int:
 
 class StateValue(BaseModel):
     """Name/value pair for DeviceState property."""
+
     Name: str = Field(description="Property name")
     Value: Any = Field(description="Property value")
 
 
 class AlpacaResponse(BaseModel):
     """Base response model for all Alpaca API responses."""
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     ClientTransactionID: int = Field(default=0)
@@ -52,6 +54,7 @@ class AlpacaResponse(BaseModel):
 
 class PropertyResponse(AlpacaResponse):
     """Response model for property GET requests."""
+
     Value: Optional[Any] = Field(default=None)
 
     @classmethod
@@ -73,6 +76,7 @@ class PropertyResponse(AlpacaResponse):
 
 class MethodResponse(AlpacaResponse):
     """Response model for method PUT requests."""
+
     Value: Optional[Any] = Field(default=None)
 
     @classmethod

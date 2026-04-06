@@ -24,7 +24,7 @@ class ServerDescription(BaseModel):
 
 
 class ServerMetadata:
-    Name = "QHYCCD Filter Wheel Alpaca Server"
+    Name = "ZWO Filter Wheel Alpaca Server"
     Manufacturer = "SensorKit"
     Version = "1.0.0"
 

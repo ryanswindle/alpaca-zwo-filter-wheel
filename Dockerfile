@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 
 LABEL maintainer="Ryan Swindle <rswindle@gmail.com>"
-LABEL description="ASCOM Alpaca server for QHYCCD filter wheels"
+LABEL description="ASCOM Alpaca server for ZWO filter wheels"
 
 WORKDIR /alpyca
 

@@ -1,10 +1,8 @@
+from ctypes import byref, c_bool, c_int, c_uint8
 from datetime import datetime, timezone
-import threading
-import time
 
-import serial
-
-from config import DeviceConfig
+from config import DeviceConfig, config
+from libefw import EFW_ERROR_CODE, EFW_INFO, EFW_SN, load_efw_library
 from log import get_logger
 
 
@@ -12,51 +10,121 @@ logger = get_logger()
 
 
 class FilterWheelDevice:
-    """Low-level driver for the QHYCCD filter wheel."""
+    """Low-level driver for the ZWO filter wheel."""
 
     def __init__(self, device_config: DeviceConfig):
         self._config = device_config
 
-        # Serial settings (fixed by the QHYCCD protocol)
-        self._baudrate = 9600
-        self._timeout = device_config.timeout
+        self.libefw = None
+
+        # SDK device ID (assigned by EFWGetID, used for all subsequent calls)
+        self._efw_id: int | None = None
+
+        # Device info populated on connect
+        self._slot_num: int = 0
+        self._hw_name: str = ""
 
         # Connection state
-        self._serial: serial.Serial | None = None
         self._connected = False
         self._connecting = False
-
-        # Motion tracking
-        self._moving = False
-
 
     #######################################
     # ASCOM Methods Common To All Devices #
     #######################################
     def connect(self):
-        """Establish serial connection, wait for home."""
+        """Scan for EFW devices, match by serial number, and open."""
+
         if self._connecting or self._connected:
             return
 
         self._connecting = True
         try:
-            self._serial = serial.Serial(
-                port=self._config.serial_port,
-                baudrate=self._baudrate,
-                bytesize=serial.EIGHTBITS,
-                parity=serial.PARITY_NONE,
-                stopbits=serial.STOPBITS_ONE,
-                timeout=1,
-            )
+            # Load the library
+            if self.libefw is None:
+                self.libefw = load_efw_library(config.library)
 
-            # Filter wheel homes when first powered and when first connected
-            self._moving = True
-            threading.Thread(target=self._moving_timer, args=(0,), daemon=True).start()
+            num = self.libefw.EFWGetNum()
+            if num <= 0:
+                raise RuntimeError("No EFW devices found")
+
+            logger.debug(f"Found {num} EFW device(s)")
+
+            # Scan all connected devices and match by serial number
+            matched_id = None
+
+            for index in range(num):
+                dev_id = c_int()
+                rc = self.libefw.EFWGetID(index, byref(dev_id))
+                if rc != EFW_ERROR_CODE.SUCCESS:
+                    logger.warning(f"EFWGetID({index}) failed: {EFW_ERROR_CODE.name(rc)}")
+                    continue
+
+                rc = self.libefw.EFWOpen(dev_id.value)
+                if rc != EFW_ERROR_CODE.SUCCESS:
+                    logger.warning(f"EFWOpen({dev_id.value}) failed: {EFW_ERROR_CODE.name(rc)}")
+                    continue
+
+                # Check serial number if configured
+                if self._config.serial_number:
+                    sn = EFW_SN()
+                    rc = self.libefw.EFWGetSerialNumber(dev_id.value, byref(sn))
+                    if rc == EFW_ERROR_CODE.SUCCESS:
+                        serial = bytes(sn.id).hex()
+                        logger.debug(f"EFW {dev_id.value}: {serial}")
+                        if serial == self._config.serial_number:
+                            matched_id = dev_id.value
+                            break
+                    else:
+                        logger.debug(f"EFWGetSerialNumber({dev_id.value}) failed: {EFW_ERROR_CODE.name(rc)}")
+
+                    # Not a match – close and continue
+                    self.libefw.EFWClose(dev_id.value)
+                else:
+                    # No serial configured – take the first device
+                    matched_id = dev_id.value
+                    break
+
+            if matched_id is None:
+                raise RuntimeError(
+                    f"No EFW device matching serial '{self._config.serial_number}'"
+                    if self._config.serial_number
+                    else "Failed to open any EFW device"
+                )
+
+            self._efw_id = matched_id
+
+            # Get device properties (required before SetPosition per SDK docs)
+            info = EFW_INFO()
+            rc = self.libefw.EFWGetProperty(self._efw_id, byref(info))
+            if rc != EFW_ERROR_CODE.SUCCESS:
+                self.libefw.EFWClose(self._efw_id)
+                raise RuntimeError(f"EFWGetProperty failed: {EFW_ERROR_CODE.name(rc)}")
+
+            self._slot_num = info.slotNum
+            self._hw_name = info.Name.decode("utf-8", errors="replace").strip()
+
+            # Set direction if configured
+            if self._config.unidirectional is not None:
+                rc = self.libefw.EFWSetDirection(self._efw_id, self._config.unidirectional)
+                if rc != EFW_ERROR_CODE.SUCCESS:
+                    logger.warning(f"EFWSetDirection failed: {EFW_ERROR_CODE.name(rc)}")
+
+            # Log firmware version
+            major, minor, build = c_uint8(), c_uint8(), c_uint8()
+            rc = self.libefw.EFWGetFirmwareVersion(
+                self._efw_id, byref(major), byref(minor), byref(build)
+            )
+            if rc == EFW_ERROR_CODE.SUCCESS:
+                logger.debug(
+                    f"Firmware: {major.value}.{minor.value}.{build.value}"
+                )
 
             self._connected = True
-            logger.info(f"Connected to filter wheel: {self._config.entity}")
+            logger.info(f"Connected to filter wheel {self._config.entity}")
+
         except Exception as e:
             logger.error(f"Connection error: {e}")
+            self._efw_id = None
             self._connected = False
             raise
         finally:
@@ -78,14 +146,16 @@ class FilterWheelDevice:
         return self._connecting
 
     def disconnect(self):
-        """Close serial connection."""
-        if self._serial and self._serial.is_open:
-            self._serial.close()
+        """Close the EFW device."""
+
+        if self._efw_id is not None:
+            rc = self.libefw.EFWClose(self._efw_id)
+            if rc != EFW_ERROR_CODE.SUCCESS:
+                logger.warning(f"EFWClose failed: {EFW_ERROR_CODE.name(rc)}")
 
         self._connected = False
-        self._serial = None
-        logger.info(f"Disconnected from filter wheel: {self._config.entity}")
-
+        self._efw_id = None
+        logger.info(f"Disconnected from filter wheel {self._config.entity}")
 
     ###########################
     # IFilterWheel properties #
@@ -100,100 +170,27 @@ class FilterWheelDevice:
 
     @property
     def position(self) -> int:
-        """Return the current filter position (0–6), or -1 if moving."""
-        if self._moving:
+        if self._efw_id is None:
+            raise RuntimeError("Not connected to filter wheel")
+
+        pos = c_int(-1)
+        rc = self.libefw.EFWGetPosition(self._efw_id, byref(pos))
+        if rc != EFW_ERROR_CODE.SUCCESS:
+            logger.error(f"EFWGetPosition failed: {EFW_ERROR_CODE.name(rc)}")
             return -1
-        return self._read_position()
+        return pos.value
 
     @position.setter
     def position(self, value: int):
-        """Command the wheel to move to *value* (0–6)."""
-        if not self._serial or not self._serial.is_open:
+        if self._efw_id is None:
             raise RuntimeError("Not connected to filter wheel")
 
-        # If the position is set too early (during a move), the controller gets stuck
-        if self._moving:
-            logger.warning("Filter wheel is currently moving, try again later")
-            return
+        rc = self.libefw.EFWSetPosition(self._efw_id, value)
+        if rc != EFW_ERROR_CODE.SUCCESS:
+            raise RuntimeError(f"EFWSetPosition failed: {EFW_ERROR_CODE.name(rc)}")
 
-        try:
-            self._serial.write(f"{value}".encode())
-        except Exception as e:
-            logger.error(f"Failed to set position: {e}")
-            raise
-
-        self._moving = True
-        time.sleep(1)
-        threading.Thread(target=self._moving_timer, args=(value,), daemon=True).start()
-
-        logger.info(f"Moving to position {value}")
+        logger.debug(f"Moving to position {value}")
 
     @property
     def timestamp(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-    ####################
-    # Internal helpers #
-    ####################
-    def _read_position(self) -> int:
-        """Query the filter wheel for its current position.
-
-        Sends 'NOW' and reads a single byte back.  Returns the position
-        as an integer (0–6), or -1 if the position cannot be determined
-        (e.g. wheel is mid-travel or communication fails).
-
-        Retries up to 3 times on empty responses before giving up.
-        """
-        if not self._serial or not self._serial.is_open:
-            logger.error("Serial port not open")
-            return -1
-
-        empty_count = 0
-
-        while True:
-            try:
-                time.sleep(1)
-                self._serial.write(b"NOW")
-                out = self._serial.read()
-
-                if out == b"":
-                    empty_count += 1
-                    if empty_count >= 3:
-                        return -1
-                    continue
-                else:
-                    empty_count = 0
-
-                return int(out.decode())
-
-            except (TypeError, ValueError):
-                return -1
-            except Exception as e:
-                logger.error(f"Failed to read position: {e}")
-                raise
-
-    def _moving_timer(self, target: int):
-        """Background thread that polls position until the wheel reaches *target*.
-
-        The QHYCCD filter wheel does not provide a hardware "moving" flag, so
-        this thread periodically queries the position and clears the
-        ``_moving`` flag once the target is reached (or on timeout).
-        """
-        time.sleep(1)
-        t0 = time.time()
-
-        while self._moving:
-            current = self._read_position()
-            logger.debug(f"Current position = {current}, Target position = {target}")
-            if current == target:
-                self._moving = False
-                time.sleep(1)
-                break
-            if (time.time() - t0) > self._timeout:
-                self._moving = False
-                raise RuntimeError("Timed out while waiting for filter wheel to move")
-            time.sleep(1)
-
-        # Sleep again to prevent
-        time.sleep(1)

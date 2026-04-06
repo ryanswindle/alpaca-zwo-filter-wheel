@@ -1,20 +1,21 @@
-entity: qhyccd_filter_wheel
+entity: zwo_filter_wheel
+library: /opt/sk/libEFWFilter.dylib
 server:
   host: 0.0.0.0
-  port: 5800
+  port: 5010
 log_level: INFO
 devices:
-  - entity: QHYCFW3XL_1
+  - entity: EFW_1
     device_number: 0
-    serial_port: /dev/ttyUSB1
+    serial_number: ""
     names:
-      - OPEN
-      - JOHNSON_R
-      - 30_LPMM
-      - 35_LPMM
-      - 75_LPMM
-      - BLOCK
-      - OPEN
+      - Filter_1
+      - Filter_2
+      - Filter_3
+      - Filter_4
+      - Filter_5
+      - Filter_6
+      - Filter_7
     focus_offsets:
       - 0
       - 0
@@ -24,3 +25,4 @@ devices:
       - 0
       - 0
     timeout: 60
+    unidirectional: false

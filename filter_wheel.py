@@ -39,9 +39,9 @@ def get_device(devnum: int) -> FilterWheelDevice:
 # High-level device/library info #
 ##################################
 class DeviceMetadata:
-    Name = "QHYCCD Filter Wheel"
+    Name = "ZWO Filter Wheel"
     Version = "1.0.0"
-    Description = "QHYCCD Filter Wheel ASCOM Alpaca Driver via Serial"
+    Description = "ZWO Filter Wheel ASCOM Alpaca Driver via EFW"
     DeviceType = "FilterWheel"
     Info = "Alpaca Device\nImplements IFilterWheelV3\nASCOM Initiative"
     InterfaceVersion = 3
@@ -49,6 +49,7 @@ class DeviceMetadata:
 
 def _connected_property(device: FilterWheelDevice, value, params):
     """Helper for simple properties that require connection."""
+
     if not device.connected:
         return PropertyResponse.create(
             value=None,

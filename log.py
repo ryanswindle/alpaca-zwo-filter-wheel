@@ -26,6 +26,7 @@ class InterceptHandler(logging.Handler):
 
 def setup_logging() -> None:
     """Configure loguru and intercept all stdlib logging."""
+
     logger.remove()
 
     log_format = (
