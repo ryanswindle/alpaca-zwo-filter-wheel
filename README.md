@@ -99,6 +99,7 @@ python test.py
 ```bash
 docker build -t alpaca-zwo-filter-wheel .
 docker run -d --name alpaca-zwo-filter-wheel \
+    -v ./config.yaml:/alpyca/config.yaml:ro \
     --network host \
     --privileged \
     -v /dev/bus/usb:/dev/bus/usb \

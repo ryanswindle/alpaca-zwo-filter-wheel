@@ -157,6 +157,10 @@ class FilterWheelDevice:
         self._efw_id = None
         logger.info(f"Disconnected from filter wheel {self._config.entity}")
 
+    @property
+    def entity(self) -> str:
+        return self._config.entity
+
     ###########################
     # IFilterWheel properties #
     ###########################
