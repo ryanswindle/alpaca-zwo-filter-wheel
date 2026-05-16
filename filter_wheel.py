@@ -1,6 +1,6 @@
-from typing import Annotated, Dict
+from typing import Dict
 
-from fastapi import APIRouter, Depends, Form, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from exceptions import (
     DriverException,
@@ -11,7 +11,7 @@ from exceptions import (
 from filter_wheel_device import FilterWheelDevice
 from log import get_logger
 from responses import MethodResponse, PropertyResponse, StateValue
-from shr import AlpacaGetParams, AlpacaPutParams, to_bool
+from shr import AlpacaGetParams, AlpacaPutParams, alpaca_put_params, to_bool
 
 
 logger = get_logger()
@@ -66,7 +66,8 @@ def _connected_property(device: FilterWheelDevice, value, params):
 # ASCOM Methods Common To All Devices #
 #######################################
 @router.put("/{devnum}/action", summary="")
-async def action(devnum: int, params: AlpacaPutParams = Depends()):
+async def action(devnum: int, params: AlpacaPutParams = Depends(alpaca_put_params)):
+    get_device(devnum)
     return MethodResponse.create(
         client_transaction_id=params.client_transaction_id,
         error=NotImplementedException("Action"),
@@ -74,7 +75,8 @@ async def action(devnum: int, params: AlpacaPutParams = Depends()):
 
 
 @router.put("/{devnum}/commandblind", summary="")
-async def commandblind(devnum: int, params: AlpacaPutParams = Depends()):
+async def commandblind(devnum: int, params: AlpacaPutParams = Depends(alpaca_put_params)):
+    get_device(devnum)
     return MethodResponse.create(
         client_transaction_id=params.client_transaction_id,
         error=NotImplementedException("CommandBlind"),
@@ -82,7 +84,8 @@ async def commandblind(devnum: int, params: AlpacaPutParams = Depends()):
 
 
 @router.put("/{devnum}/commandbool", summary="")
-async def commandbool(devnum: int, params: AlpacaPutParams = Depends()):
+async def commandbool(devnum: int, params: AlpacaPutParams = Depends(alpaca_put_params)):
+    get_device(devnum)
     return MethodResponse.create(
         client_transaction_id=params.client_transaction_id,
         error=NotImplementedException("CommandBool"),
@@ -90,7 +93,8 @@ async def commandbool(devnum: int, params: AlpacaPutParams = Depends()):
 
 
 @router.put("/{devnum}/commandstring", summary="")
-async def commandstring(devnum: int, params: AlpacaPutParams = Depends()):
+async def commandstring(devnum: int, params: AlpacaPutParams = Depends(alpaca_put_params)):
+    get_device(devnum)
     return MethodResponse.create(
         client_transaction_id=params.client_transaction_id,
         error=NotImplementedException("CommandString"),
@@ -98,7 +102,7 @@ async def commandstring(devnum: int, params: AlpacaPutParams = Depends()):
 
 
 @router.put("/{devnum}/connect", summary="")
-async def connect(devnum: int, params: AlpacaPutParams = Depends()):
+async def connect(devnum: int, params: AlpacaPutParams = Depends(alpaca_put_params)):
     device = get_device(devnum)
     try:
         device.connect(client_id=params.client_id)
@@ -122,9 +126,12 @@ async def connected_get(devnum: int, params: AlpacaGetParams = Depends()):
 
 
 @router.put("/{devnum}/connected", summary="")
-async def connected_put(devnum: int, Connected: Annotated[str, Form()], params: AlpacaPutParams = Depends()):
+async def connected_put(devnum: int, params: AlpacaPutParams = Depends(alpaca_put_params)):
     device = get_device(devnum)
-    conn = to_bool(Connected)
+    value = params.get("Connected")
+    if value is None:
+        raise HTTPException(status_code=400, detail="Missing required parameter 'Connected'")
+    conn = to_bool(value)
     try:
         if conn:
             device.connect(client_id=params.client_id)
@@ -153,6 +160,7 @@ async def connecting_get(devnum: int, params: AlpacaGetParams = Depends()):
 
 @router.get("/{devnum}/description", summary="")
 async def description(devnum: int, params: AlpacaGetParams = Depends()):
+    get_device(devnum)
     return PropertyResponse.create(
         value=DeviceMetadata.Description,
         client_transaction_id=params.client_transaction_id,
@@ -163,8 +171,9 @@ async def description(devnum: int, params: AlpacaGetParams = Depends()):
 async def devicestate(devnum: int, params: AlpacaGetParams = Depends()):
     device = get_device(devnum)
     if not device.connected:
+        # DeviceState's Value must be an array even on error
         return PropertyResponse.create(
-            value=None,
+            value=[],
             client_transaction_id=params.client_transaction_id,
             error=NotConnectedException(),
         ).model_dump()
@@ -179,14 +188,14 @@ async def devicestate(devnum: int, params: AlpacaGetParams = Depends()):
         ).model_dump()
     except Exception as ex:
         return PropertyResponse.create(
-            value=None,
+            value=[],
             client_transaction_id=params.client_transaction_id,
             error=DriverException(0x500, "FilterWheel.DeviceState failed", ex),
         ).model_dump()
 
 
 @router.put("/{devnum}/disconnect", summary="")
-async def disconnect(devnum: int, params: AlpacaPutParams = Depends()):
+async def disconnect(devnum: int, params: AlpacaPutParams = Depends(alpaca_put_params)):
     device = get_device(devnum)
     try:
         device.disconnect(client_id=params.client_id)
@@ -202,6 +211,7 @@ async def disconnect(devnum: int, params: AlpacaPutParams = Depends()):
 
 @router.get("/{devnum}/driverinfo", summary="")
 async def driverinfo(devnum: int, params: AlpacaGetParams = Depends()):
+    get_device(devnum)
     return PropertyResponse.create(
         value=DeviceMetadata.Info,
         client_transaction_id=params.client_transaction_id,
@@ -210,6 +220,7 @@ async def driverinfo(devnum: int, params: AlpacaGetParams = Depends()):
 
 @router.get("/{devnum}/driverversion", summary="")
 async def driverversion(devnum: int, params: AlpacaGetParams = Depends()):
+    get_device(devnum)
     return PropertyResponse.create(
         value=DeviceMetadata.Version,
         client_transaction_id=params.client_transaction_id,
@@ -218,6 +229,7 @@ async def driverversion(devnum: int, params: AlpacaGetParams = Depends()):
 
 @router.get("/{devnum}/interfaceversion", summary="")
 async def interfaceversion(devnum: int, params: AlpacaGetParams = Depends()):
+    get_device(devnum)
     return PropertyResponse.create(
         value=DeviceMetadata.InterfaceVersion,
         client_transaction_id=params.client_transaction_id,
@@ -226,6 +238,7 @@ async def interfaceversion(devnum: int, params: AlpacaGetParams = Depends()):
 
 @router.get("/{devnum}/name", summary="")
 async def name(devnum: int, params: AlpacaGetParams = Depends()):
+    get_device(devnum)
     return PropertyResponse.create(
         value=DeviceMetadata.Name,
         client_transaction_id=params.client_transaction_id,
@@ -234,6 +247,7 @@ async def name(devnum: int, params: AlpacaGetParams = Depends()):
 
 @router.get("/{devnum}/supportedactions", summary="")
 async def supportedactions(devnum: int, params: AlpacaGetParams = Depends()):
+    get_device(devnum)
     return PropertyResponse.create(
         value=[],
         client_transaction_id=params.client_transaction_id,
@@ -310,8 +324,11 @@ async def position_get(devnum: int, params: AlpacaGetParams = Depends()):
 
 
 @router.put("/{devnum}/position", summary="")
-async def position_put(devnum: int, Position: Annotated[str, Form()], params: AlpacaPutParams = Depends()):
+async def position_put(devnum: int, params: AlpacaPutParams = Depends(alpaca_put_params)):
     device = get_device(devnum)
+    value = params.get("Position")
+    if value is None:
+        raise HTTPException(status_code=400, detail="Missing required parameter 'Position'")
     if not device.connected:
         return MethodResponse.create(
             client_transaction_id=params.client_transaction_id,
@@ -319,11 +336,11 @@ async def position_put(devnum: int, Position: Annotated[str, Form()], params: Al
         ).model_dump()
 
     try:
-        pos = int(Position)
+        pos = int(value)
     except ValueError:
         return MethodResponse.create(
             client_transaction_id=params.client_transaction_id,
-            error=InvalidValueException(f"Position {Position} not a valid integer."),
+            error=InvalidValueException(f"Position {value} not a valid integer."),
         ).model_dump()
 
     num_filters = len(device.names)
@@ -331,7 +348,7 @@ async def position_put(devnum: int, Position: Annotated[str, Form()], params: Al
         return MethodResponse.create(
             client_transaction_id=params.client_transaction_id,
             error=InvalidValueException(
-                f"Position {Position} out of range (0–{num_filters - 1})."
+                f"Position {value} out of range (0–{num_filters - 1})."
             ),
         ).model_dump()
 
