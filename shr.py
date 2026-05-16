@@ -43,14 +43,36 @@ def _ci_lookup(mapping: Mapping[str, str], key: str) -> Optional[str]:
 
 
 class AlpacaGetParams:
-    """Common Alpaca GET query parameters, parsed case-insensitively."""
+    """Common Alpaca GET query parameters, parsed case-insensitively.
+
+    Also exposes case-insensitive lookups for method-specific query params
+    (e.g. ISwitch's `Id` parameter). ConformU's `alpacaprotocol` test
+    sends GET query parameters with inverted casing and expects them to
+    be accepted, so use `params.get(name)` / `params.get_int(name)`
+    instead of typed `Query(...)` declarations.
+    """
 
     def __init__(self, request: Request):
         q = request.query_params
+        self._query = q
         self.client_id = _parse_uint(_ci_lookup(q, "ClientID"), "ClientID")
         self.client_transaction_id = _parse_uint(
             _ci_lookup(q, "ClientTransactionID"), "ClientTransactionID"
         )
+
+    def get(self, name: str) -> Optional[str]:
+        """Case-insensitive query-string lookup."""
+        return _ci_lookup(self._query, name)
+
+    def get_int(self, name: str) -> int:
+        """Required integer query param via case-insensitive lookup."""
+        v = self.get(name)
+        if v is None:
+            raise HTTPException(status_code=400, detail=f"Missing required parameter {name!r}")
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"{name} must be an integer, got {v!r}")
 
 
 class AlpacaPutParams:
