@@ -101,7 +101,7 @@ async def commandstring(devnum: int, params: AlpacaPutParams = Depends()):
 async def connect(devnum: int, params: AlpacaPutParams = Depends()):
     device = get_device(devnum)
     try:
-        device.connect()
+        device.connect(client_id=params.client_id)
         return MethodResponse.create(
             client_transaction_id=params.client_transaction_id,
         ).model_dump()
@@ -126,7 +126,10 @@ async def connected_put(devnum: int, Connected: Annotated[str, Form()], params: 
     device = get_device(devnum)
     conn = to_bool(Connected)
     try:
-        device.connected = conn
+        if conn:
+            device.connect(client_id=params.client_id)
+        else:
+            device.disconnect(client_id=params.client_id)
         return MethodResponse.create(
             client_transaction_id=params.client_transaction_id,
         ).model_dump()
@@ -186,7 +189,7 @@ async def devicestate(devnum: int, params: AlpacaGetParams = Depends()):
 async def disconnect(devnum: int, params: AlpacaPutParams = Depends()):
     device = get_device(devnum)
     try:
-        device.disconnect()
+        device.disconnect(client_id=params.client_id)
         return MethodResponse.create(
             client_transaction_id=params.client_transaction_id,
         ).model_dump()

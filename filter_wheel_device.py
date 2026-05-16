@@ -1,5 +1,6 @@
 from ctypes import byref, c_bool, c_int, c_uint8
 from datetime import datetime, timezone
+from threading import Lock
 
 from config import DeviceConfig, config
 from libefw import EFW_ERROR_CODE, EFW_INFO, EFW_SN, load_efw_library
@@ -24,20 +25,66 @@ class FilterWheelDevice:
         self._slot_num: int = 0
         self._hw_name: str = ""
 
-        # Connection state
-        self._connected = False
+        # Per-client connection tracking. The physical EFW is opened on
+        # the first client to connect and closed only when the last client
+        # disconnects, so multiple Alpaca clients can share the device
+        # without one's Disconnect knocking another offline. ClientID is
+        # taken from the Alpaca request params; alpyca defaults to 0 if
+        # the caller doesn't set it, which means alpyca clients that
+        # don't override ClientID will share that slot — unavoidable
+        # given the spec.
+        self._connected_clients: set[int] = set()
+        self._clients_lock = Lock()
         self._connecting = False
 
     #######################################
     # ASCOM Methods Common To All Devices #
     #######################################
-    def connect(self):
+    def connect(self, client_id: int = 0) -> None:
+        """Register a client. Opens the EFW if this is the first connection."""
+
+        with self._clients_lock:
+            if client_id in self._connected_clients:
+                return
+            first_client = not self._connected_clients
+            if first_client:
+                self._connecting = True
+                try:
+                    self._open_device()
+                finally:
+                    self._connecting = False
+            self._connected_clients.add(client_id)
+            logger.info(
+                f"Client {client_id} connected to {self._config.entity} "
+                f"({len(self._connected_clients)} active)"
+            )
+
+    def disconnect(self, client_id: int = 0) -> None:
+        """Unregister a client. Closes the EFW when the last client leaves."""
+
+        with self._clients_lock:
+            if client_id not in self._connected_clients:
+                return
+            self._connected_clients.discard(client_id)
+            remaining = len(self._connected_clients)
+            if remaining == 0:
+                self._close_device()
+            logger.info(
+                f"Client {client_id} disconnected from {self._config.entity} "
+                f"({remaining} active)"
+            )
+
+    def shutdown(self) -> None:
+        """Force-close the EFW regardless of client state (server shutdown)."""
+
+        with self._clients_lock:
+            self._connected_clients.clear()
+            if self._efw_id is not None:
+                self._close_device()
+
+    def _open_device(self) -> None:
         """Scan for EFW devices, match by serial number, and open."""
 
-        if self._connecting or self._connected:
-            return
-
-        self._connecting = True
         try:
             # Load the library
             if self.libefw is None:
@@ -119,43 +166,32 @@ class FilterWheelDevice:
                     f"Firmware: {major.value}.{minor.value}.{build.value}"
                 )
 
-            self._connected = True
-            logger.info(f"Connected to filter wheel {self._config.entity}")
+            logger.info(f"Opened filter wheel {self._config.entity}")
 
         except Exception as e:
             logger.error(f"Connection error: {e}")
             self._efw_id = None
-            self._connected = False
             raise
-        finally:
-            self._connecting = False
 
     @property
     def connected(self) -> bool:
-        return self._connected
-
-    @connected.setter
-    def connected(self, value: bool):
-        if value and not self._connected:
-            self.connect()
-        elif not value and self._connected:
-            self.disconnect()
+        # Reading set truthiness is atomic in CPython, no lock needed
+        return bool(self._connected_clients)
 
     @property
     def connecting(self) -> bool:
         return self._connecting
 
-    def disconnect(self):
-        """Close the EFW device."""
+    def _close_device(self) -> None:
+        """Close the underlying EFW handle (caller holds _clients_lock)."""
 
         if self._efw_id is not None:
             rc = self.libefw.EFWClose(self._efw_id)
             if rc != EFW_ERROR_CODE.SUCCESS:
                 logger.warning(f"EFWClose failed: {EFW_ERROR_CODE.name(rc)}")
 
-        self._connected = False
         self._efw_id = None
-        logger.info(f"Disconnected from filter wheel {self._config.entity}")
+        logger.info(f"Closed filter wheel {self._config.entity}")
 
     @property
     def entity(self) -> str:

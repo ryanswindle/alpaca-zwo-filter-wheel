@@ -55,11 +55,13 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown: disconnect all devices
+    # Shutdown: force-close every device regardless of client state.
+    # disconnect() is per-client and would no-op if no client_id=0 was
+    # registered; shutdown() clears the client set and closes the handle.
     for dev in devices.values():
         if dev.connected:
             try:
-                dev.disconnect()
+                dev.shutdown()
             except Exception as e:
                 logger.warning(f"Error disconnecting {config.entity}: {e}")
     logger.info("Server shutdown complete")
